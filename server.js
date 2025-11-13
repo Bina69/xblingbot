@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SECRET_KEY_HEX = process.env.SECRET_KEY_HEX; // must be 64 hex chars (32 bytes)
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;     // used by PHP server-side to fetch list
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || ""; // e.g. https://yourdomain.com
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://xbling.gt.tc"; // e.g. https://yourdomain.com
 const PORT = parseInt(process.env.PORT||"10000", 10);
 
 if (!BOT_TOKEN || !SECRET_KEY_HEX || !ACCESS_TOKEN) {
