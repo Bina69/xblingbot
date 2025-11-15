@@ -1,4 +1,4 @@
-// server.js - SỬ DỤNG WEBHOOK THAY VÌ POLLING
+// server.js - BOT TRẢ VỀ DIRECT URL
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -19,7 +19,7 @@ const SECRET_KEY_HEX = process.env.SECRET_KEY_HEX;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;     
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || ""; 
 const PORT = parseInt(process.env.PORT || "10000", 10);
-const BASE_URL = process.env.BASE_URL || `https://your-render-url.onrender.com`;
+const BASE_URL = process.env.BASE_URL || `https://xblingbot.onrender.com`;
 
 if (!BOT_TOKEN || !SECRET_KEY_HEX || !ACCESS_TOKEN) {
   console.error("Missing required environment variables");
@@ -103,7 +103,7 @@ function cleanupOld() {
 }
 
 // ===================================
-// TELEGRAM BOT - SỬ DỤNG WEBHOOK
+// TELEGRAM BOT - WEBHOOK
 // ===================================
 
 const bot = new TelegramBot(BOT_TOKEN);
@@ -111,7 +111,7 @@ const app = express();
 
 app.use(express.json());
 
-// Webhook route - QUAN TRỌNG: phải đứng trước các middleware khác
+// Webhook route
 app.post(`/bot${BOT_TOKEN}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
@@ -158,7 +158,7 @@ bot.on('message', async (msg) => {
 });
 
 // ===================================
-// EXPRESS MIDDLEWARE & ROUTES
+// EXPRESS ROUTES - QUAN TRỌNG: TRẢ VỀ DIRECT URL
 // ===================================
 
 // CORS
@@ -182,7 +182,32 @@ app.use((req, res, next) => {
   next();
 });
 
-// API endpoints
+// ENDPOINT MỚI: Trả về DIRECT URLs (không qua stream proxy)
+app.get('/get-direct-videos', (req, res) => {
+  const token = req.query.token || '';
+  if (!timingSafeCompare(token, ACCESS_TOKEN)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  cleanupOld();
+  const entries = loadEntries();
+  
+  // QUAN TRỌNG: Trả về direct URLs thay vì stream URLs
+  const list = entries.map(e => {
+    const directUrl = aesDecrypt(e.enc);
+    return {
+      id: e.id,
+      type: e.type,
+      ts: e.ts,
+      stream: directUrl // DIRECT URL từ Telegram
+    };
+  }).filter(e => e.stream !== null); // Lọc bỏ những URL giải mã thất bại
+  
+  console.log(`📤 Trả về ${list.length} direct URLs`);
+  res.json(list);
+});
+
+// ENDPOINT CŨ: Vẫn giữ để tương thích (trả về stream URLs)
 app.get('/get-videos', (req, res) => {
   const token = req.query.token || '';
   if (!timingSafeCompare(token, ACCESS_TOKEN)) {
@@ -203,6 +228,7 @@ app.get('/get-videos', (req, res) => {
   res.json(list);
 });
 
+// Stream proxy: Vẫn giữ để hỗ trợ các client cũ
 app.get('/stream', async (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).send('Missing id');
@@ -259,7 +285,14 @@ app.get('/stream', async (req, res) => {
 
 // Health check
 app.get('/', (req, res) => {
-  res.send('Bot is running!');
+  res.json({ 
+    status: 'ok',
+    message: 'Bot is running with direct URLs support',
+    endpoints: {
+      direct_videos: '/get-direct-videos?token=ACCESS_TOKEN',
+      stream_videos: '/get-videos?token=ACCESS_TOKEN'
+    }
+  });
 });
 
 // Setup webhook khi khởi động
@@ -275,6 +308,9 @@ async function setupWebhook() {
 
 // Start server
 app.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Bot Telegram ready (Webhook mode)`);
+  console.log(`🔗 Direct URLs endpoint: /get-direct-videos`);
+  console.log(`🔗 Stream URLs endpoint: /get-videos`);
   await setupWebhook();
 });
