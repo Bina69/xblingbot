@@ -1,4 +1,4 @@
-// server.js - CODE ĐÃ KIỂM TRA LỖI
+// server.js - ĐÃ SỬA LỖI MULTIPLE BOT INSTANCE
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -102,10 +102,42 @@ function cleanupOld() {
 }
 
 // ===================================
-// TELEGRAM BOT
+// TELEGRAM BOT - SỬA LỖI POLLING
 // ===================================
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// Tạo bot với polling config
+const bot = new TelegramBot(BOT_TOKEN, { 
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10
+    }
+  }
+});
+
+let isBotRunning = false;
+
+// Xử lý polling errors
+bot.on('polling_error', (error) => {
+  console.error(`Bot polling error: ${error.code} - ${error.message}`);
+  
+  // Nếu là lỗi conflict (409), đợi 5 giây rồi thử lại
+  if (error.code === 'ETELEGRAM' && error.message.includes('409')) {
+    console.log('🔄 Phát hiện multiple bot instance, đợi 5s rồi thử lại...');
+    setTimeout(() => {
+      if (!isBotRunning) {
+        console.log('🔄 Khởi động lại bot polling...');
+        bot.startPolling();
+        isBotRunning = true;
+      }
+    }, 5000);
+  }
+});
+
+bot.on('webhook_error', (error) => {
+  console.error('Webhook error:', error);
+});
 
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "Send Video");
@@ -145,10 +177,6 @@ bot.on('message', async (msg) => {
   } catch (e) {
     console.error("Bot message error:", e);
   }
-});
-
-bot.on('polling_error', (error) => {
-    console.error(`Bot polling error: ${error.code}`);
 });
 
 // ===================================
@@ -253,7 +281,23 @@ app.get('/stream', async (req, res) => {
   }
 });
 
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('🛑 Đang dừng bot...');
+  bot.stopPolling();
+  isBotRunning = false;
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('🛑 Đang dừng bot...');
+  bot.stopPolling();
+  isBotRunning = false;
+  process.exit(0);
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  isBotRunning = true;
 });
