@@ -1,4 +1,4 @@
-// server.js - ĐÃ SỬA LỖI MULTIPLE BOT INSTANCE
+// server.js - SỬ DỤNG WEBHOOK THAY VÌ POLLING
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -19,6 +19,7 @@ const SECRET_KEY_HEX = process.env.SECRET_KEY_HEX;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;     
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || ""; 
 const PORT = parseInt(process.env.PORT || "10000", 10);
+const BASE_URL = process.env.BASE_URL || `https://your-render-url.onrender.com`;
 
 if (!BOT_TOKEN || !SECRET_KEY_HEX || !ACCESS_TOKEN) {
   console.error("Missing required environment variables");
@@ -102,41 +103,18 @@ function cleanupOld() {
 }
 
 // ===================================
-// TELEGRAM BOT - SỬA LỖI POLLING
+// TELEGRAM BOT - SỬ DỤNG WEBHOOK
 // ===================================
 
-// Tạo bot với polling config
-const bot = new TelegramBot(BOT_TOKEN, { 
-  polling: {
-    interval: 300,
-    autoStart: true,
-    params: {
-      timeout: 10
-    }
-  }
-});
+const bot = new TelegramBot(BOT_TOKEN);
+const app = express();
 
-let isBotRunning = false;
+app.use(express.json());
 
-// Xử lý polling errors
-bot.on('polling_error', (error) => {
-  console.error(`Bot polling error: ${error.code} - ${error.message}`);
-  
-  // Nếu là lỗi conflict (409), đợi 5 giây rồi thử lại
-  if (error.code === 'ETELEGRAM' && error.message.includes('409')) {
-    console.log('🔄 Phát hiện multiple bot instance, đợi 5s rồi thử lại...');
-    setTimeout(() => {
-      if (!isBotRunning) {
-        console.log('🔄 Khởi động lại bot polling...');
-        bot.startPolling();
-        isBotRunning = true;
-      }
-    }, 5000);
-  }
-});
-
-bot.on('webhook_error', (error) => {
-  console.error('Webhook error:', error);
+// Webhook route - QUAN TRỌNG: phải đứng trước các middleware khác
+app.post(`/bot${BOT_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
 });
 
 bot.onText(/\/start/, (msg) => {
@@ -180,10 +158,8 @@ bot.on('message', async (msg) => {
 });
 
 // ===================================
-// EXPRESS APP
+// EXPRESS MIDDLEWARE & ROUTES
 // ===================================
-const app = express();
-app.use(express.json());
 
 // CORS
 const allowedOriginsList = [ALLOWED_ORIGIN, 'http://localhost:3000', 'http://localhost:10000'];
@@ -281,23 +257,24 @@ app.get('/stream', async (req, res) => {
   }
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('🛑 Đang dừng bot...');
-  bot.stopPolling();
-  isBotRunning = false;
-  process.exit(0);
+// Health check
+app.get('/', (req, res) => {
+  res.send('Bot is running!');
 });
 
-process.on('SIGTERM', () => {
-  console.log('🛑 Đang dừng bot...');
-  bot.stopPolling();
-  isBotRunning = false;
-  process.exit(0);
-});
+// Setup webhook khi khởi động
+async function setupWebhook() {
+  try {
+    const webhookUrl = `${BASE_URL}/bot${BOT_TOKEN}`;
+    await bot.setWebHook(webhookUrl);
+    console.log(`✅ Webhook set to: ${webhookUrl}`);
+  } catch (error) {
+    console.error('❌ Failed to set webhook:', error.message);
+  }
+}
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
-  isBotRunning = true;
+  await setupWebhook();
 });
